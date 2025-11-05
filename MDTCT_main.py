@@ -106,27 +106,49 @@ def train_stage(model, dataloader, optimizer, scheduler):
     for batch in dataloader:
 
         input_ids = batch["input_ids"].to(device) # input_ids - 마스크된 토큰이 포함된 문장
-        labels = batch["labels"].to(device) # labels - 마스크 위치의 정답 토큰 (정답을 제외한 나머지는 -100)
+        labels = batch["labels"].to(device) # labels - 마스크 위치의 정답 토큰 (정답을 제외한 나머지 -100)
 
-        # 마스크 위치 정보
+        # 마스크 위치 정보 만들기
             # 원래 토크나이징 하면서 마스크 위치 정보도 넘겨줄까 고려했지만 데이터셋 크기를 고려해 배치 내에서 생성
         mask_pos = labels.ne(-100)
         
         # Forward Propagation 및 Loss 계산
         logits = model(input_ids) # logits: [배치크기 (문장 개수), 시퀀스길이(한문장이 토큰수 고정), 단어사전크기(bert 사전크기)]의 점수
-        loss = diffusion_loss(logits, labels, mask_pos)
+        loss = diffusion_loss(logits, labels, mask_pos) # 연욱님이 만든 함수
         
         # Backpropagation
         optimizer.zero_grad() # 옵티마이저 초기화
         loss.backward() # 역전파
         optimizer.step() # 가중치 업데이트
-        scheduler.step() # 학습 진행할 수록 lr 감소
+
+        scheduler.step() # 학습 진행할 수록 lr 감소시킴
         
         total_loss += loss.item()
     return total_loss / len(dataloader)
 
 
 # 5. 검증 함수 (Validation) - 이태훈
+def evaluate(model, dataloader, device='cuda'):
+    model.eval()
+    # 평가 모드 - Dropout 비활성화
+    total_loss = 0.0
+    
+    # 그래디언트 계산 비활성화
+    with torch.no_grad():
+
+        # 위 와 동일
+        for batch in dataloader:
+
+            input_ids = batch["input_ids"].to(device) 
+            labels = batch["labels"].to(device)
+            mask_pos = labels.ne(-100)
+            
+            logits = model(input_ids)
+            loss = diffusion_loss(logits, labels, mask_pos)
+            
+            total_loss += loss.item()
+    return total_loss / len(dataloader)
+
 
 # 6. 커리큘럼 학습 - 이태훈
 
