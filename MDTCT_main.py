@@ -142,7 +142,68 @@ def evaluate(model, dataloader, device='cuda'):
 
 
 # 7. 추론 : 텍스트 생성 - 윤희빈 
+from transformers import AutoTokenizer
+import torch
+
+def sample_from_model(model, tokenizer, prompt_text="Once upon a time", steps=10, max_length=30):
+    """
+    Diffusion 방식으로 텍스트를 점진적으로 복원하는 함수
+    학습이 안된 모델일 경우, 출력은 랜덤하지만 구조 테스트 용도로 사용 가능
+    """
+    model.eval()
+    input_ids = tokenizer.encode(prompt_text, return_tensors="pt").to(device)
+    print(f"\n[시작 프롬프트]: {prompt_text}")
+    print("-" * 60)
+
+    with torch.no_grad():
+        for step in range(steps):
+            logits = model(input_ids)                          # 모델 출력 (예측 점수)
+            preds = torch.argmax(logits, dim=-1)               # 각 토큰별 가장 높은 확률 선택
+            text = tokenizer.decode(preds[0], skip_special_tokens=True)  # 숫자→단어로 변환
+            print(f"Step {step+1:02d}/{steps}: {text}")
+
+    return text
+
 
 
 # 8. 메인 실행 코드 - 윤희빈
+if __name__ == "__main__":
+    print("\n" + "=" * 70)
+    print("Diffusion 기반 텍스트 생성 테스트 시작")
+    print("=" * 70)
 
+    # ✅ 토크나이저 로드
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+    # ✅ 모델 초기화 (랜덤 상태)
+    model = MaskedDiffusionTransformer().to(device)
+
+    generated_text = sample_from_model(
+        model=model,
+        tokenizer=tokenizer,
+        prompt_text="Once upon a time",  # 시작 문장
+        steps=5,                         # Diffusion 스텝 수 (많을수록 점진적 복원)
+        max_length=40                    # 출력 토큰 최대 길이
+    )
+
+    print("\n[최종 생성 결과]")
+    print("=" * 70)
+    print(generated_text)
+    print("=" * 70)
+
+
+'''
+# 데이터 로드 확인 (테스트용)
+from datasets import load_from_disk
+import os
+
+base_dir = os.path.join(os.getcwd(), "tinystories_export")
+test_path = os.path.join(base_dir, "test_tok_60")
+
+print(f"데이터 경로 확인: {test_path}")
+ds = load_from_disk(test_path)
+print(f"샘플 개수: {len(ds)}")
+print("features:", ds.column_names)
+print("첫 샘플 예시:")
+print({k: ds[0][k][:10] if isinstance(ds[0][k], list) else ds[0][k] for k in ds.column_names})
+'''
