@@ -60,42 +60,29 @@ def diffusion_loss(logits, labels, mask_pos=None):
     return loss
 
 # 3. 데이터셋 로딩 함수 - 정연욱
-"""
-from datasets import load_from_disk, concatenate_datasets
+BASE_DIR = "data/tinystories_export"
+device = "cuda" if torch.cuda.is_available() else "cpu"
+# 3. 데이터셋 로딩 함수 - 정연욱
+from datasets import load_from_disk
 import os
 
-print("모든 train 데이터셋을 로딩합니다...")
-
-base_dir = "/content/drive/MyDrive/tinystories_export" #경로 상대 경로로 수정 필요?
-data_paths = [
-    f"{base_dir}/train_tok_20",
-    f"{base_dir}/train_tok_40",
-    f"{base_dir}/train_tok_60",
-    f"{base_dir}/train_tok_80"
-]
-
-dataset_list = []
-for path in data_paths:
-    if os.path.exists(path):
-        ds = load_from_disk(path) 
-        print(f"  -> {path} 로드 완료 (샘플 수: {len(ds)})")
-        dataset_list.append(ds)
-    else:
-        print(f"경고: {path}를 찾을 수 없습니다.")
-
-# 4개의 데이터셋을 하나로 합치기
-all_train_data = concatenate_datasets(dataset_list)
-
-print(f"\n모든 데이터셋 통합 완료 (총 샘플 수: {len(all_train_data)})")
-
-# 통합된 전체 데이터셋에 PyTorch 형식 설정
-all_train_data.set_format(
-    type="torch", 
-    columns=["input_ids", "labels", "attention_mask"]
-)
-print("PyTorch 텐서 형식으로 설정 완료")
-"""
-
+def load_dataset_by_mask_prob(mask_prob):
+    print(f"===== 마스크 {mask_prob}% 데이터셋 로딩 시작 =====")
+    # 1. 인풋(mask_prob)을 사용해 경로 생성
+    path = f"{BASE_DIR}/train_tok_{mask_prob}"
+    # 2. 해당 데이터셋 로드
+    if not os.path.exists(path):
+        print(f"경고: {path}를 찾을 수 없습니다. 경로를 확인하세요.")
+        raise FileNotFoundError(f"데이터셋 경로를 찾을 수 없음: {path}")
+    ds = load_from_disk(path)
+    print(f"  -> {path} 로드 완료 (샘플 수: {len(ds)})")
+    # 3. PyTorch 형식 설정
+    ds.set_format(
+        type="torch", 
+        columns=["input_ids", "labels", "attention_mask"]
+    )
+    print("  -> PyTorch 텐서 형식으로 설정 완료")
+    return ds
 
 # 4. 학습 함수 (Training) - 이태훈
 def train_stage(model, dataloader, optimizer, scheduler):
