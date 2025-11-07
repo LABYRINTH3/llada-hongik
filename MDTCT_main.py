@@ -1,7 +1,10 @@
 # 전처리 - 토크나이징 (Tokenizing) - 김기현
 
 # 0. 기본 설정
-
+# 학습 하이퍼파라미터
+epochs_per_stage = 2
+batch_size = 256
+lr = 1e-4
 
 # 1. 토크나이저 (Tokenizer) 설정 - 김기현
 
@@ -138,7 +141,87 @@ def evaluate(model, dataloader, device='cuda'):
 
 
 # 6. 커리큘럼 학습 - 이태훈
+# 6. 커리큘럼 학습 - 이태훈
+def curriculum_train():
+    # 모델 생성 후 GPU로 이동
+    model = MaskedDiffusionTransformer(tokenizer.vocab_size).to(device)
+    
+    # 모델 파라미터 수 출력
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f" 모델 생성 파라미터 수: {total_params:,}개")
+    
+    model = torch.compile(model)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr) # Adam 옵티마이저 사용
+    
+    # 체크포인트 경로
+    prev_ckpt = None
+    
+    dataset_name = "tinystories_masked_p"
+    probs = tinystory_probs # 확률 리스트 [0.2, 0.4, 0.6, 0.8]
 
+    # 각 마스킹 확률에 대해 순차적으로 학습
+    for p in probs:
+        # 전체 데이터셋 로드
+        ds_all = load_dataset(dataset_name, p)
+        
+        # 데이터셋을 학습/검증 세트로 분할
+        split = ds_all.train_test_split(test_size=0.1, seed=77)
+        ds_train = split["train"] # 학습 데이터셋 (90%)
+        ds_validation = split["test"] # 검증 데이터셋 (10%)
+
+        print(f" 학습 데이터: {len(ds_train):}개")
+        print(f" 검증 데이터: {len(ds_validation):}개")
+
+        # 학습용 DataLoader
+        train_loader = DataLoader(
+            ds_train,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=4, # 코랩 결제하면 cpu 코어수 4개...
+            prefetch_factor=4 # 각 워커가 미리 로드하는 배치 수
+        )
+        
+        # 검증용 DataLoader
+        val_loader = DataLoader(
+            ds_validation,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=4,
+            prefetch_factor=4
+        )
+        
+        # 이전 단계 체크포인트 로드
+        if prev_ckpt:
+            model.load_state_dict(torch.load(prev_ckpt, map_location=device))
+            print(f" 이전 단계 가중치 로드: {prev_ckpt}")
+        
+        # 스케줄러 설정
+        total_steps = epochs_per_stage * len(train_loader)
+
+        # 스케줄러 설정
+        # 허깅페이스 라이브러리 가져옴 - 모델 학습률 동적으로 조절
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=total_steps // 10,
+            num_training_steps=total_steps
+        )
+        
+        # 학습 루프
+        for epoch in range(1, epochs_per_stage + 1):
+            print(f"\n Epoch {epoch}/{epochs_per_stage}")
+            train_loss = train_stage(model, train_loader, optimizer, scheduler) # 학습 - 이태훈
+            val_loss = evaluate(model, val_loader, device) # 검증 함수 - 이태훈
+
+            print(f" Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+
+        # 체크포인트 저장
+        ckpt_path = os.path.join(checkpoint_dir, f"tinystories_mask{int(p*100)}.pt")
+        torch.save(model.state_dict(), ckpt_path)
+        print(f"\n 체크포인트 저장: {ckpt_path}")
+
+        # 이전 단계 체크포인트 업데이트
+        prev_ckpt = ckpt_path
+    print(f" 학습 완료!!!!!!!!!!")
 
 
 # 7. 추론 : 텍스트 생성 - 윤희빈 
