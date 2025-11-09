@@ -141,7 +141,6 @@ def evaluate(model, dataloader, device='cuda'):
 
 
 # 6. 커리큘럼 학습 - 이태훈
-# 6. 커리큘럼 학습 - 이태훈
 def curriculum_train():
     # 모델 생성 후 GPU로 이동
     model = MaskedDiffusionTransformer(tokenizer.vocab_size).to(device)
@@ -169,8 +168,8 @@ def curriculum_train():
         ds_train = split["train"] # 학습 데이터셋 (90%)
         ds_validation = split["test"] # 검증 데이터셋 (10%)
 
-        print(f" 학습 데이터: {len(ds_train):}개")
-        print(f" 검증 데이터: {len(ds_validation):}개")
+        print(f" 학습 데이터: {len(ds_train)}개")
+        print(f" 검증 데이터: {len(ds_validation)}개")
 
         # 학습용 DataLoader
         train_loader = DataLoader(
