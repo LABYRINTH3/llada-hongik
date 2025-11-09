@@ -18,7 +18,7 @@ from datasets import load_from_disk
 import os
 
 # ----------------------------------------
-# 🔹 1. Transformer 인코더 블록 직접 구현
+#  1. Transformer 인코더 블록 직접 구현
 # ----------------------------------------
 class TransformerEncoderBlock(nn.Module):
     def __init__(self, hidden_dim=512, num_heads=8, ffn_dim=2048, dropout=0.1):
@@ -54,7 +54,7 @@ class TransformerEncoderBlock(nn.Module):
 
 
 # ----------------------------------------
-# 🔹 2. 전체 모델 구조 정의
+#  2. 전체 모델 구조 정의
 # ----------------------------------------
 class MaskedDiffusionTransformer(nn.Module):
     def __init__(self, vocab_size=30522, hidden_dim=512, num_layers=6, num_heads=8, ffn_dim=2048, max_length=512):
@@ -155,7 +155,10 @@ def train_stage(model, dataloader, optimizer, scheduler):
         mask_pos = labels.ne(-100)
         
         # Forward Propagation 및 Loss 계산
-        logits = model(input_ids) # logits: [배치크기 (문장 개수), 시퀀스길이(한문장이 토큰수 고정), 단어사전크기(bert 사전크기)]의 점수
+        
+        # logits: [배치크기 (문장 개수), 시퀀스길이(한문장이 토큰수 고정), 단어사전크기(bert 사전크기)]의 점수
+        # 즉, logits[i][j][k]는 i번째 문장의 j번째 토큰이 k번째 단어일 점수
+        logits = model(input_ids)
         loss = diffusion_loss(logits, labels, mask_pos) # 연욱님이 만든 함수
         
         # Backpropagation
