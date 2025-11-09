@@ -13,30 +13,82 @@ lr = 1e-4
 # 2.1 모델 정의: Masked Diffusion Transformer - 정연욱
 import torch
 import torch.nn as nn
-from transformers import BertConfig, BertModel
+import torch.nn.functional as F
+from datasets import load_from_disk
+import os
 
-class MaskedDiffusionTransformer(nn.Module):
-    def __init__(self, vocab_size=30522, hidden_dim=512, num_layers=6, num_heads=8, ffn_dim=2048):
+# ----------------------------------------
+# 🔹 1. Transformer 인코더 블록 직접 구현
+# ----------------------------------------
+class TransformerEncoderBlock(nn.Module):
+    def __init__(self, hidden_dim=512, num_heads=8, ffn_dim=2048, dropout=0.1):
         super().__init__()
-        # BERT 설정값
-        config = BertConfig(
-            vocab_size=vocab_size,
-            hidden_size=hidden_dim,
-            num_hidden_layers=num_layers,
-            num_attention_heads=num_heads,
-            intermediate_size=ffn_dim
+        # (1) Multi-Head Self-Attention
+        self.self_attn = nn.MultiheadAttention(hidden_dim, num_heads, batch_first=True)
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.dropout1 = nn.Dropout(dropout)
+
+        # (2) Feed Forward Network
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_dim, ffn_dim),
+            nn.ReLU(),
+            nn.Linear(ffn_dim, hidden_dim)
         )
+        self.norm2 = nn.LayerNorm(hidden_dim)
+        self.dropout2 = nn.Dropout(dropout)
 
-        #Transformer 인코더 (BERT 기반)
-        self.encoder = BertModel(config)
+    def forward(self, x, attention_mask=None):
+        # attention_mask: 1은 유지, 0은 패딩 (BERT와 동일한 규칙)
+        key_padding_mask = None
+        if attention_mask is not None:
+            key_padding_mask = ~attention_mask.bool()  # (1->False, 0->True)
 
-        #출력층: 각 토큰별 단어 예측 (vocab 크기만큼 확률)
+        # (1) Self-Attention + 잔차 연결 + 정규화
+        attn_out, _ = self.self_attn(x, x, x, key_padding_mask=key_padding_mask)
+        x = self.norm1(x + self.dropout1(attn_out))
+
+        # (2) FFN + 잔차 연결 + 정규화
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + self.dropout2(ffn_out))
+        return x
+
+
+# ----------------------------------------
+# 🔹 2. 전체 모델 구조 정의
+# ----------------------------------------
+class MaskedDiffusionTransformer(nn.Module):
+    def __init__(self, vocab_size=30522, hidden_dim=512, num_layers=6, num_heads=8, ffn_dim=2048, max_length=512):
+        super().__init__()
+
+        # (1) 임베딩: 단어 + 위치 정보 결합
+        self.token_emb = nn.Embedding(vocab_size, hidden_dim)
+        self.pos_emb = nn.Embedding(max_length, hidden_dim)
+
+        # (2) 직접 구성한 Transformer 인코더 레이어 6개
+        self.encoder_layers = nn.ModuleList([
+            TransformerEncoderBlock(hidden_dim, num_heads, ffn_dim)
+            for _ in range(num_layers)
+        ])
+        self.norm = nn.LayerNorm(hidden_dim)
+
+        # (3) 출력층: 각 토큰별로 단어 예측 (vocab 크기만큼 확률)
         self.output_layer = nn.Linear(hidden_dim, vocab_size)
 
     def forward(self, input_ids, attention_mask=None):
-        outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        hidden_states = outputs.last_hidden_state  #[batch, seq_len, hidden_dim]
-        logits = self.output_layer(hidden_states)  #[batch, seq_len, vocab_size]
+        B, L = input_ids.shape
+        pos = torch.arange(L, device=input_ids.device).unsqueeze(0).expand(B, -1)
+
+        # (1) 입력 임베딩
+        x = self.token_emb(input_ids) + self.pos_emb(pos)
+
+        # (2) 인코더 블록 통과
+        for layer in self.encoder_layers:
+            x = layer(x, attention_mask)
+
+        x = self.norm(x)
+
+        # (3) 출력층
+        logits = self.output_layer(x)  # [batch, seq_len, vocab_size]
         return logits
 
 # 장치 설정 (GPU or CPU)
