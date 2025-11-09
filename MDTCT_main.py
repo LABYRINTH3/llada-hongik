@@ -6,8 +6,10 @@ epochs_per_stage = 2
 batch_size = 256
 lr = 1e-4
 
-# 1. 토크나이저 (Tokenizer) 설정 - 김기현
-
+tinystory_probs = [0.2, 0.4, 0.6, 0.8]
+# 1. 토크나이저 (Tokenizer) 설정 - 이태훈
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+mask_token_id = tokenizer.mask_token_id
 
 
 # 2.1 모델 정의: Masked Diffusion Transformer - 정연욱
@@ -308,9 +310,6 @@ if __name__ == "__main__":
     print("\n" + "=" * 70)
     print("Diffusion 기반 텍스트 생성 테스트 시작")
     print("=" * 70)
-
-    # ✅ 토크나이저 로드
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
     # ✅ 모델 초기화 (랜덤 상태)
     model = MaskedDiffusionTransformer().to(device)
