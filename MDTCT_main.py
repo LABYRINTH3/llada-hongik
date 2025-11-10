@@ -280,28 +280,66 @@ def curriculum_train():
     print(f" 학습 완료!!!!!!!!!!")
 
 
-# 7. 추론 : 텍스트 생성 - 윤희빈 
+# 7. 추론 : 텍스트 생성 - 윤희빈
 from transformers import AutoTokenizer
 import torch
 
-def sample_from_model(model, tokenizer, prompt_text="Once upon a time", steps=10, max_length=30):
+def mask_inputs(input_ids, t, mask_token_id, prompt_length):
+    """
+    입력 시퀀스 중 일부를 확률 t에 따라 [MASK]로 변환하는 함수
+    """
+    B, L = input_ids.shape  # 배치 크기, 시퀀스 길이
+    gen_region = torch.zeros_like(input_ids, dtype=torch.bool)
+    gen_region[:, prompt_length:] = True  # 프롬프트 이후 구간만 생성 대상
+
+    rand = torch.rand((B, L), device=input_ids.device)
+    step_mask = rand < t.view(B, 1)  # 확률 t보다 작은 위치 마스킹
+    mask_pos = gen_region & step_mask
+
+    noised = input_ids.clone()
+    noised[mask_pos] = mask_token_id  # [MASK] 토큰으로 덮기
+    return noised, mask_pos
+
+
+def sample_from_model(model, tokenizer, prompt_text="Once upon a time", steps=10, response_length=30):
     """
     Diffusion 방식으로 텍스트를 점진적으로 복원하는 함수
-    학습이 안된 모델일 경우, 출력은 랜덤하지만 구조 테스트 용도로 사용 가능
+    - 처음엔 [MASK]로 가득 채워진 문장에서 시작
+    - step마다 일부를 예측값으로 교체하며 점점 완성
     """
     model.eval()
-    input_ids = tokenizer.encode(prompt_text, return_tensors="pt").to(device)
-    print(f"\n[시작 프롬프트]: {prompt_text}")
-    print("-" * 60)
-
     with torch.no_grad():
-        for step in range(steps):
-            logits = model(input_ids)                          # 모델 출력 (예측 점수)
-            preds = torch.argmax(logits, dim=-1)               # 각 토큰별 가장 높은 확률 선택
-            text = tokenizer.decode(preds[0], skip_special_tokens=True)  # 숫자→단어로 변환
-            print(f"Step {step+1:02d}/{steps}: {text}")
+        # 프롬프트 토큰화
+        prompt_ids = tokenizer.encode(prompt_text, return_tensors="pt").to(device)
+        B, Lp = prompt_ids.shape  # 배치 크기, 프롬프트 길이
+        R = response_length       # 생성할 토큰 수
 
-    return text
+        # 생성 영역을 전부 [MASK]로 초기화
+        response = torch.full((B, R), tokenizer.mask_token_id, dtype=torch.long, device=device)
+        combined = torch.cat([prompt_ids, response], dim=1)
+
+        # t 값(마스킹 확률)을 1.0 → 0.0으로 점차 줄임
+        t_schedule = torch.linspace(1.0, 0.0, steps, device=device)
+
+        print(f"\n[시작 프롬프트]: {prompt_text}\n" + "-" * 60)
+        for step, t in enumerate(t_schedule):
+            t = t.expand(B)
+            # 1 일부를 [MASK]로 다시 덮음
+            noised_inputs, mask_pos = mask_inputs(combined, t, tokenizer.mask_token_id, Lp)
+
+            # 2 모델 예측 수행
+            logits = model(noised_inputs)
+            preds = logits.argmax(-1)  # 가장 확률 높은 단어 선택
+
+            # 3 마스크된 부분만 예측값으로 교체
+            combined[mask_pos] = preds[mask_pos]
+
+            # 중간 결과 출력
+            current_text = tokenizer.decode(combined[0, Lp:], skip_special_tokens=True)
+            print(f"Step {step+1:02d}/{steps} (t={t[0]:.2f}): {current_text}")
+
+        # 최종 결과 반환
+        return tokenizer.decode(combined[0, Lp:], skip_special_tokens=True)
 
 
 
