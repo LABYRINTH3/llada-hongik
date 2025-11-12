@@ -1,3 +1,5 @@
+from transformers import AutoTokenizer
+
 # 전처리 - 토크나이징 (Tokenizing) - 김기현
 
 # 0. 기본 설정
@@ -357,7 +359,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         prompt_text="Once upon a time",  # 시작 문장
         steps=5,                         # Diffusion 스텝 수 (많을수록 점진적 복원)
-        max_length=40                    # 출력 토큰 최대 길이
+        response_length=40                    # 출력 토큰 최대 길이
     )
 
     print("\n[최종 생성 결과]")
