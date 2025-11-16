@@ -283,103 +283,92 @@ def curriculum_train():
 
 
 # 7. 추론 : 텍스트 생성 - 윤희빈
-from transformers import AutoTokenizer
-import torch
 
 def mask_inputs(input_ids, t, mask_token_id, prompt_length):
-    """
-    입력 시퀀스 중 일부를 확률 t에 따라 [MASK]로 변환하는 함수
-    """
-    B, L = input_ids.shape  # 배치 크기, 시퀀스 길이
+    B, L = input_ids.shape
     gen_region = torch.zeros_like(input_ids, dtype=torch.bool)
-    gen_region[:, prompt_length:] = True  # 프롬프트 이후 구간만 생성 대상
+    gen_region[:, prompt_length:] = True  
 
     rand = torch.rand((B, L), device=input_ids.device)
-    step_mask = rand < t.view(B, 1)  # 확률 t보다 작은 위치 마스킹
+    step_mask = rand < t.view(B, 1)
     mask_pos = gen_region & step_mask
 
     noised = input_ids.clone()
-    noised[mask_pos] = mask_token_id  # [MASK] 토큰으로 덮기
+    noised[mask_pos] = mask_token_id
     return noised, mask_pos
 
 
-def sample_from_model(model, tokenizer, prompt_text="Once upon a time", steps=10, response_length=30):
-    """
-    Diffusion 방식으로 텍스트를 점진적으로 복원하는 함수
-    - 처음엔 [MASK]로 가득 채워진 문장에서 시작
-    - step마다 일부를 예측값으로 교체하며 점점 완성
-    """
+def sample_from_model(model, tokenizer, prompt_ids,
+                      response_length=50, steps=10, device='cuda'):
     model.eval()
-    with torch.no_grad():
-        # 프롬프트 토큰화
-        prompt_ids = tokenizer.encode(prompt_text, return_tensors="pt").to(device)
-        B, Lp = prompt_ids.shape  # 배치 크기, 프롬프트 길이
-        R = response_length       # 생성할 토큰 수
+    B, Lp = prompt_ids.shape
+    R = response_length
 
-        # 생성 영역을 전부 [MASK]로 초기화
-        response = torch.full((B, R), tokenizer.mask_token_id, dtype=torch.long, device=device)
-        combined = torch.cat([prompt_ids, response], dim=1)
+    response = torch.full((B, R),
+                          tokenizer.mask_token_id,
+                          dtype=torch.long,
+                          device=device)
 
-        # t 값(마스킹 확률)을 1.0 → 0.0으로 점차 줄임
-        t_schedule = torch.linspace(1.0, 0.0, steps, device=device)
+    combined = torch.cat([prompt_ids.to(device), response], dim=1)
 
-        print(f"\n[시작 프롬프트]: {prompt_text}\n" + "-" * 60)
-        for step, t in enumerate(t_schedule):
-            t = t.expand(B)
-            # 1 일부를 [MASK]로 다시 덮음
-            noised_inputs, mask_pos = mask_inputs(combined, t, tokenizer.mask_token_id, Lp)
+    t_schedule = torch.linspace(1.0, 0.0, steps, device=device)
 
-            # 2 모델 예측 수행
-            logits = model(noised_inputs)
-            preds = logits.argmax(-1)  # 가장 확률 높은 단어 선택
+    for step in range(steps):
+        t = t_schedule[step].expand(B)
+        noised_inputs, mask_pos = mask_inputs(
+            combined, t, tokenizer.mask_token_id, Lp
+        )
+        logits = model(noised_inputs)
+        preds = logits.argmax(-1)
+        combined[mask_pos] = preds[mask_pos]
 
-            # 3 마스크된 부분만 예측값으로 교체
-            combined[mask_pos] = preds[mask_pos]
-
-            # 중간 결과 출력
-            current_text = tokenizer.decode(combined[0, Lp:], skip_special_tokens=True)
-            print(f"Step {step+1:02d}/{steps} (t={t[0]:.2f}): {current_text}")
-
-        # 최종 결과 반환
-        return tokenizer.decode(combined[0, Lp:], skip_special_tokens=True)
-
+    # 생성된 토큰 부분만 반환
+    return combined[:, Lp:]
 
 
 # 8. 메인 실행 코드 - 윤희빈
+import glob
+
+checkpoint_dir = "./checkpoints" #weight의 저장 위치
 if __name__ == "__main__":
     print("\n" + "=" * 70)
-    print("Diffusion 기반 텍스트 생성 테스트 시작")
+    print("Diffusion 기반 텍스트 생성 시작 (체크포인트별 비교)")
     print("=" * 70)
 
-    # ✅ 모델 초기화 (랜덤 상태)
-    model = MaskedDiffusionTransformer().to(device)
+    ckpt_paths = sorted(glob.glob(os.path.join(checkpoint_dir, "*.pt"))) #weight 불러오기
+    if not ckpt_paths:
+        raise FileNotFoundError("체크포인트 파일을 찾을 수 없습니다.")
 
-    generated_text = sample_from_model(
-        model=model,
-        tokenizer=tokenizer,
-        prompt_text="Once upon a time",  # 시작 문장
-        steps=5,                         # Diffusion 스텝 수 (많을수록 점진적 복원)
-        response_length=40                    # 출력 토큰 최대 길이
-    )
+    prompt_text = "Once upon a time"
+    prompt_ids = tokenizer.encode(prompt_text, return_tensors="pt")
 
-    print("\n[최종 생성 결과]")
-    print("=" * 70)
-    print(generated_text)
-    print("=" * 70)
+    for ckpt_path in ckpt_paths:
+        print("\n📌 체크포인트 불러오는 중:", os.path.basename(ckpt_path))
 
+        # 1) 모델 선언
+        model = MaskedDiffusionTransformer(tokenizer.vocab_size).to(device)
 
-'''
-# 데이터 로드 확인 (테스트용)
-from datasets import load_from_disk
-import os
+        # 2) state_dict 로드 (compile 제거 처리 포함)
+        raw_state = torch.load(ckpt_path, map_location=device)
+        new_state = {}
+        for k, v in raw_state.items():
+            new_key = k[len("_orig_mod."):] if k.startswith("_orig_mod.") else k
+            new_state[new_key] = v
+        model.load_state_dict(new_state)
 
-base_dir = os.path.join(os.getcwd(), "tinystories_export")
-test_path = os.path.join(base_dir, "test_tok_60")
+        print("   → 모델 로드 완료")
 
-print(f"데이터 경로 확인: {test_path}")
-ds = load_from_disk(test_path)
-print(f"샘플 개수: {len(ds)}")
-print("features:", ds.column_names)
-print("첫 샘플 예시:")
-print({k: ds[0][k][:10] if isinstance(ds[0][k], list) else ds[0][k] for k in ds.column_names})
-'''
+        # 3) inference 실행
+        out_ids = sample_from_model(
+            model,
+            tokenizer,
+            prompt_ids=prompt_ids,
+            response_length=40,
+            steps=40,
+            device=device
+        )
+
+        generated = tokenizer.decode(out_ids[0], skip_special_tokens=True)
+        print("   → 생성 결과:")
+        print("     ", generated)
+        print("-" * 70)
