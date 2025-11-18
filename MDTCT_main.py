@@ -56,7 +56,7 @@ class TransformerEncoderBlock(nn.Module):
         x = self.norm2(x + self.dropout2(ffn_out))
         return x
 
-
+'''
 # ----------------------------------------
 #  2. 전체 모델 구조 정의
 # ----------------------------------------
@@ -117,6 +117,33 @@ def diffusion_loss(logits, labels, mask_pos=None):
         ignore_index=-100
     )
     return loss
+'''
+class MaskedDiffusionTransformer(nn.Module):
+    def __init__(self, vocab_size, d_model=512, n_layers=6, n_heads=8, max_length=512):
+        super().__init__()
+        self.token_emb   = nn.Embedding(vocab_size, d_model)
+        self.pos_emb     = nn.Embedding(max_length, d_model)
+        enc_layer       = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, batch_first=True)
+        self.encoder     = nn.TransformerEncoder(enc_layer, num_layers=n_layers)
+        self.output_proj = nn.Linear(d_model, vocab_size)
+
+    def forward(self, input_ids, mask_positions=None):
+        B, L = input_ids.shape
+        pos = torch.arange(L, device=input_ids.device).unsqueeze(0).expand(B, -1)
+        x = self.token_emb(input_ids) + self.pos_emb(pos)
+        x = self.encoder(x)
+        return self.output_proj(x)
+
+criterion = nn.CrossEntropyLoss(reduction='none')
+def diffusion_loss(logits, target_ids, mask_positions):
+    B, L, V = logits.shape
+    loss_all = criterion(
+        logits.view(B*L, V),
+        target_ids.view(B*L)
+    ).view(B, L)
+    return (loss_all * mask_positions.float()).sum() \
+           / mask_positions.sum().clamp_min(1.0)
+
 
 # 3. 데이터셋 로딩 함수 - 정연욱
 BASE_DIR = "data/tinystories_export"
@@ -289,6 +316,7 @@ def mask_inputs(input_ids, t, mask_token_id, prompt_length):
     gen_region = torch.zeros_like(input_ids, dtype=torch.bool)
     gen_region[:, prompt_length:] = True  
 
+#mask_input() 안에서 매 스텝마다 랜덤 마스킹 발생 -> 모델이 다시 채워넣는 단어도 달라짐.
     rand = torch.rand((B, L), device=input_ids.device)
     step_mask = rand < t.view(B, 1)
     mask_pos = gen_region & step_mask
@@ -329,17 +357,17 @@ def sample_from_model(model, tokenizer, prompt_ids,
 # 8. 메인 실행 코드 - 윤희빈
 import glob
 
-checkpoint_dir = "./checkpoints" #weight의 저장 위치
+checkpoint_dir = "./weight" # <- weight의 저장 위치
 if __name__ == "__main__":
     print("\n" + "=" * 70)
     print("Diffusion 기반 텍스트 생성 시작 (체크포인트별 비교)")
     print("=" * 70)
 
-    ckpt_paths = sorted(glob.glob(os.path.join(checkpoint_dir, "*.pt"))) #weight 불러오기
+    ckpt_paths = sorted(glob.glob(os.path.join(checkpoint_dir, "*.pt")))  #weight 불러오기
     if not ckpt_paths:
         raise FileNotFoundError("체크포인트 파일을 찾을 수 없습니다.")
 
-    prompt_text = "Once upon a time"
+    prompt_text = "Once upon a time"        # <-  추론의 input 
     prompt_ids = tokenizer.encode(prompt_text, return_tensors="pt")
 
     for ckpt_path in ckpt_paths:
@@ -363,8 +391,8 @@ if __name__ == "__main__":
             model,
             tokenizer,
             prompt_ids=prompt_ids,
-            response_length=40,
-            steps=40,
+            response_length=50, #출력할 토큰(단어) 수
+            steps=40,         #반복 횟수
             device=device
         )
 
