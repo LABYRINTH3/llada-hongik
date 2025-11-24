@@ -402,7 +402,11 @@ def curriculum_train():
 #         print("-" * 70)
 
 
-#위의 7번과 8번은 데이터셋 여러개를 동시에 보여주지만 우리의 프로젝트에서는 학습된 데이터 셋 1개에서 반복할때마다 점진적으로 문장이 생성되는걸 보여주는게 유리하다고 판단했다.
+# --------------------------------------------------------------------------
+# 기존 코드는 여러 체크포인트의 최종 결과를 비교하는 방식이었으나,
+# 마스킹 디퓨전 모델의 작동 과정을 보여주기 위해 단일 체크포인트의 40단계 정제 로그를 출력하도록 수정함.
+# --------------------------------------------------------------------------
+
 
 # 7. 추론 : 텍스트 생성 - 윤희빈
 
@@ -426,7 +430,7 @@ def mask_inputs(input_ids, t, mask_token_id, prompt_length):
 
 
 def sample_from_model_with_log(model, tokenizer, prompt_ids,
-                               response_length=20, # 최대 문장 길이 20으로 설정 (요청 반영)
+                               response_length=20, # 최대 문장 길이 20으로 설정
                                steps=40, device='cuda'):
     model.eval()
     B, Lp = prompt_ids.shape
@@ -447,7 +451,7 @@ def sample_from_model_with_log(model, tokenizer, prompt_ids,
     print(f"\n🚀 텍스트 생성 정제 과정 시작 (Steps: {steps}, Response Length: {R})")
     print("----------------------------------------------------------------------")
     
-    # 초기 프롬프트 텍스트 출력 (요청 반영)
+    # 초기 프롬프트 텍스트 출력 
     initial_prompt = tokenizer.decode(prompt_ids[0], skip_special_tokens=True)
     print(f"Initial Prompt: '{initial_prompt}'")
     print("----------------------------------------------------------------------")
@@ -479,8 +483,6 @@ def sample_from_model_with_log(model, tokenizer, prompt_ids,
 
 
 # 8. 메인 실행 코드 - 윤희빈
-
-# 8. 메인 실행 코드 - 윤희빈
 import glob
 from torch.utils.data import DataLoader
 from datasets import load_dataset
@@ -495,21 +497,20 @@ if __name__ == "__main__":
     print("Diffusion 기반 텍스트 생성 시작 (tinystories_masked_p_mask80.pt 로그 출력)")
     print("=" * 70)
 
-    # 요청: tinystories_masked_p_mask80.pt 체크포인트만 사용
-    # *참고: 프로젝트 구조에 맞게 경로와 파일명을 정확하게 확인하세요.*
+    # tinystories_masked_p_mask80.pt 체크포인트만 사용
+    # 참고: 프로젝트 구조에 맞게 경로와 파일명을 정확하게 확인.
     ckpt_path = os.path.join(checkpoint_dir, "tinystories_masked_p_mask80.pt")
     
     if not os.path.exists(ckpt_path):
         raise FileNotFoundError(f"요청된 체크포인트 파일을 찾을 수 없습니다: {ckpt_path}")
     
     # 프롬프트 설정
-    prompt_text = "Once upon a time"        # <-  추론의 input 
+    prompt_text = "hello. world!"        # <-  추론의 input.. 바꿔도 되지만 일단은 이걸로 고정
     prompt_ids = tokenizer.encode(prompt_text, return_tensors="pt")
 
     print("\n📌 체크포인트 불러오는 중:", os.path.basename(ckpt_path))
 
     # 1) 모델 선언
-    # *참고: MaskedDiffusionTransformer 클래스가 코드 상단에 정의되어 있어야 합니다.*
     model = MaskedDiffusionTransformer(tokenizer.vocab_size).to(device)
 
     # 2) state_dict 로드 (compile 제거 처리 포함)
