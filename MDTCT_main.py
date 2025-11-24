@@ -505,7 +505,7 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"요청된 체크포인트 파일을 찾을 수 없습니다: {ckpt_path}")
     
     # 프롬프트 설정
-    prompt_text = "hello. world!"        # <-  추론의 input.. 바꿔도 되지만 일단은 이걸로 고정
+    prompt_text = "Once upon a time"        # <-  추론의 input.. 바꿔도 되지만 일단은 이걸로 고정
     prompt_ids = tokenizer.encode(prompt_text, return_tensors="pt")
 
     print("\n📌 체크포인트 불러오는 중:", os.path.basename(ckpt_path))
